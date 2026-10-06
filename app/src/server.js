@@ -317,6 +317,11 @@ app.get('/api/whoami', wrap(async (req, res) => {
   res.json(await getWhoami());
 }));
 
+// Datos del evento para la pantalla de la sala.
+app.get('/api/evento', (req, res) => {
+  res.json({ nombre: 'Charla AWS', lugar: 'UTN FRC' };
+});
+
 // Mientras la base no terminó de conectar y migrar, todo lo que la necesita
 // responde 503. El login de admin no la usa, así que queda afuera.
 app.use('/api', (req, res, next) => {
