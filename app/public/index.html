@@ -33,9 +33,18 @@
       </nav>
     </header>
 
+    <div class="db-banner" id="db-banner" role="status" hidden>
+      <span class="db-dot" aria-hidden="true"></span>
+      La base de datos no está disponible. Reintentando cada 5 s…
+    </div>
+
     <main id="view" class="view" aria-live="polite"></main>
 
     <footer class="footer">
+      <div class="served-by" id="served-by" title="Task de ECS que respondió">
+        <span class="served-dot" aria-hidden="true"></span>
+        <span id="served-text">conectando…</span>
+      </div>
       <div class="org-chip">
         <img src="/assets/chip.png" alt="" aria-hidden="true" />
         <span>AWS Student Builder Group<br />at UTN FRC</span>

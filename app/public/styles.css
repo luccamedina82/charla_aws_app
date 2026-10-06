@@ -99,7 +99,31 @@ button, input, select, textarea{ font: inherit; color: inherit; }
 
 /* ---------- layout ---------- */
 .view{ flex: 1; margin-top: 36px; width: 100%; max-width: 1040px; }
-.footer{ margin-top: 40px; display: flex; justify-content: flex-end; }
+.footer{ margin-top: 40px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Task que respondió: el color sale del ID, así un cambio de task se ve de lejos */
+.served-by{
+  --task: var(--text-faint);
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--task); border-radius: 999px;
+  background: var(--bg-raised);
+  font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+  transition: border-color .3s ease;
+}
+.served-dot{ width: 8px; height: 8px; border-radius: 50%; background: var(--task); flex: none; transition: background .3s ease; }
+
+/* Aviso de base caída */
+.db-banner{
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 24px; width: 100%; max-width: 1040px;
+  padding: 12px 16px; border-radius: var(--radius-md);
+  border: 1px solid var(--bad); background: var(--bad-soft); color: var(--bad);
+  font-family: var(--mono); font-size: 13px;
+}
+.db-banner[hidden]{ display: none; }
+.db-dot{ width: 8px; height: 8px; border-radius: 50%; background: var(--bad); flex: none; animation: db-pulse 1.2s ease-in-out infinite; }
+@keyframes db-pulse{ 50%{ opacity: .25; } }
 .org-chip{
   display: flex; align-items: center; gap: 10px;
   padding: 8px 14px 8px 8px;

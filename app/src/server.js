@@ -287,8 +287,34 @@ app.get('/api/health', (req, res) => {
 
 // Chequeo de la base, solo para diagnóstico. El ALB no lo usa.
 app.get('/api/health/db', wrap(async (req, res) => {
+  if (!isReady()) throw Object.assign(new Error('Base no inicializada'), { code: 'DB_NOT_READY' });
   await pool.query('SELECT 1');
-  res.json({ ok: true, ready: isReady() });
+  res.json({ ok: true });
+}));
+
+// Qué task respondió, en qué AZ y con qué versión. Es lo que hace visible el
+// balanceo, el reemplazo de una task y el blue/green. Fuera de ECS no existe
+// el metadata endpoint y se devuelve "local". El task no cambia durante la
+// vida del proceso, así que se consulta una sola vez.
+const APP_VERSION = process.env.APP_VERSION || 'dev';
+let whoamiCache = null;
+async function getWhoami() {
+  if (whoamiCache) return whoamiCache;
+  const base = process.env.ECS_CONTAINER_METADATA_URI_V4;
+  if (!base) return (whoamiCache = { task: 'local', az: 'local', version: APP_VERSION });
+  const res = await fetch(`${base}/task`, { signal: AbortSignal.timeout(2000) });
+  const meta = await res.json();
+  whoamiCache = {
+    task: String(meta.TaskARN || '').split('/').pop().slice(0, 8) || '?',
+    az: meta.AvailabilityZone || '?',
+    version: APP_VERSION
+  };
+  return whoamiCache;
+}
+
+app.get('/api/whoami', wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await getWhoami());
 }));
 
 // Mientras la base no terminó de conectar y migrar, todo lo que la necesita

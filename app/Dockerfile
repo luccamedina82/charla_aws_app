@@ -15,6 +15,12 @@ COPY src ./src
 COPY db ./db
 COPY public ./public
 
+# El buildspec pasa el hash corto del commit. Se muestra en el pie de página
+# para ver qué versión sirve cada task durante el blue/green. Va después de
+# los COPY para que un hash nuevo no invalide la caché de esas capas.
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 USER node
 EXPOSE 8080
 

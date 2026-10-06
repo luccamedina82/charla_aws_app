@@ -47,6 +47,9 @@
 
   var view = document.getElementById('view');
   var toastEl = document.getElementById('toast');
+  var dbBanner = document.getElementById('db-banner');
+  var servedBy = document.getElementById('served-by');
+  var servedText = document.getElementById('served-text');
 
   function setPlayerToken(t) { state.playerToken = t; store.set(KEYS.player, t); }
   function setAdminToken(t) { state.adminToken = t; store.set(KEYS.admin, t); }
@@ -115,11 +118,47 @@
             err.code = data.error;
             err.status = res.status;
             if (err.code === 'ADMIN_REQUIRED') setAdminToken(null);
+            if (err.code === 'DB_UNAVAILABLE') setDbDown(true);
             throw err;
           }
+          if (!opts.noDb) setDbDown(false);
           return data;
         });
       });
+  }
+
+  // -------------------------------------------------------------------------
+  // Base caída y task que respondió
+  // -------------------------------------------------------------------------
+  // Con la base caída se muestra el aviso y se reintenta sola cada 5 s. Cuando
+  // vuelve, la vista que había quedado en error se recarga sin tocar nada.
+  var dbDown = false;
+  function setDbDown(down) {
+    if (dbDown === down) return;
+    dbDown = down;
+    dbBanner.hidden = !down;
+    if (!down && state.dbErrorView) {
+      state.dbErrorView = false;
+      render();
+    }
+  }
+
+  // Color estable derivado del ID de la task: misma task, mismo color.
+  function taskColor(id) {
+    var h = 0;
+    for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ', 85%, 65%)';
+  }
+
+  function refreshServedBy() {
+    fetch('/api/whoami', { cache: 'no-store' })
+      .then(function (res) { return res.json(); })
+      .then(function (w) {
+        servedText.textContent = 'task ' + w.task + ' · ' + w.az + ' · v ' + w.version;
+        servedBy.style.setProperty('--task', taskColor(w.task));
+      })
+      .catch(function () { servedText.textContent = 'sin conexión con el servidor'; });
+    if (dbDown) api('GET', '/api/health/db').catch(function () {});
   }
 
   function withBusy(btn, promise) {
@@ -151,6 +190,7 @@
   }
 
   function renderError(err) {
+    if (err.code === 'DB_UNAVAILABLE') state.dbErrorView = true;
     view.innerHTML =
       '<section class="stack">' +
         '<p class="error">' + esc(err.message) + '</p>' +
@@ -477,6 +517,7 @@
       toast(err.message, true);
       return renderAdminLogin();
     }
+    if (err.code === 'DB_UNAVAILABLE') state.dbErrorView = true;
     var body = adminBody();
     if (body) body.innerHTML = '<p class="error">' + esc(err.message) + '</p>';
   }
@@ -500,7 +541,7 @@
 
   function onAdminLogin(form) {
     var btn = form.querySelector('button[type="submit"]');
-    withBusy(btn, api('POST', '/api/admin/login', { password: form.password.value }))
+    withBusy(btn, api('POST', '/api/admin/login', { password: form.password.value }, { noDb: true }))
       .then(function (data) {
         setAdminToken(data.token);
         toast('Sesión de admin iniciada');
@@ -879,4 +920,6 @@
 
   window.addEventListener('hashchange', render);
   render();
+  refreshServedBy();
+  setInterval(refreshServedBy, BOARD_REFRESH_MS);
 })();
