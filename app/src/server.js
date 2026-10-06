@@ -1,7 +1,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
-const { pool, waitForDatabase, migrate } = require('./db');
+const { pool, initDatabase, isReady, isUnavailable } = require('./db');
 
 // ---------------------------------------------------------------------------
 // Configuración
@@ -278,10 +278,25 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get('/api/health', wrap(async (req, res) => {
-  await pool.query('SELECT 1');
+// Health check del ALB. NO toca la base a propósito: si consultara MySQL, una
+// caída de la base marcaría todas las tasks como unhealthy y ECS las mataría,
+// convirtiendo una falla parcial en una caída total.
+app.get('/api/health', (req, res) => {
   res.json({ ok: true });
+});
+
+// Chequeo de la base, solo para diagnóstico. El ALB no lo usa.
+app.get('/api/health/db', wrap(async (req, res) => {
+  await pool.query('SELECT 1');
+  res.json({ ok: true, ready: isReady() });
 }));
+
+// Mientras la base no terminó de conectar y migrar, todo lo que la necesita
+// responde 503. El login de admin no la usa, así que queda afuera.
+app.use('/api', (req, res, next) => {
+  if (isReady() || req.path === '/admin/login') return next();
+  next(Object.assign(new Error('Base no inicializada'), { code: 'DB_NOT_READY' }));
+});
 
 // ---------- Jugadores ----------
 app.post('/api/players', rateLimit({ windowMs: 60_000, max: 20 }), wrap(async (req, res) => {
@@ -501,6 +516,9 @@ app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'INVALID_JSON', message: 'El cuerpo de la request no es JSON válido.' });
   }
+  if (isUnavailable(err)) {
+    return res.status(503).json({ error: 'DB_UNAVAILABLE', message: 'La base de datos no está disponible. Reintentando...' });
+  }
   console.error('[error]', err);
   res.status(500).json({ error: 'INTERNAL', message: 'Error interno. Probá de nuevo en unos segundos.' });
 });
@@ -508,10 +526,11 @@ app.use((err, req, res, next) => {
 // ---------------------------------------------------------------------------
 // Arranque
 // ---------------------------------------------------------------------------
-async function main() {
-  await waitForDatabase();
-  await migrate();
+function main() {
+  // Primero escuchar, después la base. Si fuera al revés, una task que arranca
+  // con MySQL caído nunca pasaría el health check y ECS la reiniciaría en loop.
   const server = app.listen(PORT, () => console.log(`[app] Trivia AWS escuchando en :${PORT}`));
+  initDatabase();
 
   const shutdown = (signal) => {
     console.log(`[app] ${signal} recibido, cerrando...`);
@@ -522,7 +541,4 @@ async function main() {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-main().catch((err) => {
-  console.error('[app] No se pudo iniciar:', err);
-  process.exit(1);
-});
+main();
