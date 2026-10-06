@@ -1,0 +1,59 @@
+{
+  "family": "trivia-mysql",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "runtimePlatform": { "operatingSystemFamily": "LINUX", "cpuArchitecture": "X86_64" },
+  "volumes": [
+    {
+      "name": "mysql-data",
+      "efsVolumeConfiguration": {
+        "fileSystemId": "<EFS_ID>",
+        "transitEncryption": "ENABLED",
+        "authorizationConfig": {
+          "accessPointId": "<EFS_ACCESS_POINT_ID>",
+          "iam": "DISABLED"
+        }
+      }
+    }
+  ],
+  "containerDefinitions": [
+    {
+      "name": "mysql",
+      "image": "public.ecr.aws/docker/library/mysql:8.4",
+      "essential": true,
+      "portMappings": [
+        { "name": "mysql", "containerPort": 3306, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "MYSQL_DATABASE", "value": "trivia" },
+        { "name": "MYSQL_USER", "value": "trivia" }
+      ],
+      "secrets": [
+        { "name": "MYSQL_ROOT_PASSWORD", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:trivia/db-XXXXXX:root_password::" },
+        { "name": "MYSQL_PASSWORD", "valueFrom": "arn:aws:secretsmanager:<REGION>:<ACCOUNT_ID>:secret:trivia/db-XXXXXX:password::" }
+      ],
+      "mountPoints": [
+        { "sourceVolume": "mysql-data", "containerPath": "/var/lib/mysql", "readOnly": false }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent || exit 1"],
+        "interval": 10,
+        "timeout": 5,
+        "retries": 5,
+        "startPeriod": 90
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/trivia",
+          "awslogs-region": "<REGION>",
+          "awslogs-stream-prefix": "mysql",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

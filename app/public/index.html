@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#10141c" />
+  <title>Trivia AWS Builders</title>
+  <link rel="icon" type="image/png" href="/assets/chip.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="stage">
+    <div class="grid-bg" aria-hidden="true"></div>
+    <div class="glow glow-1" aria-hidden="true"></div>
+    <div class="glow glow-2" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="#/jugar" aria-label="Trivia AWS — inicio">
+        <img src="/assets/aws-logo.png" alt="AWS" />
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-tag">AWS Student<br /><b>Builder Group</b></span>
+      </a>
+      <nav class="nav" aria-label="Secciones">
+        <a class="nav-link" href="#/jugar" data-route="jugar">Jugar</a>
+        <a class="nav-link" href="#/tabla" data-route="tabla">Tabla</a>
+        <a class="nav-link nav-icon" href="#/admin" data-route="admin" title="Editar preguntas (admin)">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" stroke="currentColor" stroke-width="1.8"/></svg>
+          <span>Admin</span>
+        </a>
+      </nav>
+    </header>
+
+    <main id="view" class="view" aria-live="polite"></main>
+
+    <footer class="footer">
+      <div class="org-chip">
+        <img src="/assets/chip.png" alt="" aria-hidden="true" />
+        <span>AWS Student Builder Group<br />at UTN FRC</span>
+      </div>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
