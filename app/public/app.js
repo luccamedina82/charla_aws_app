@@ -130,7 +130,7 @@
   // -------------------------------------------------------------------------
   // Base caída y task que respondió
   // -------------------------------------------------------------------------
-  // Con la base caída se muestra el aviso y se reintenta sola cada 5 s. Cuando
+  // Con la base caída se muestra el aviso y se chequea sola cada 5 s. Cuando
   // vuelve, la vista que había quedado en error se recarga sin tocar nada.
   var dbDown = false;
   function setDbDown(down) {
@@ -158,7 +158,9 @@
         servedBy.style.setProperty('--task', taskColor(w.task));
       })
       .catch(function () { servedText.textContent = 'sin conexión con el servidor'; });
-    if (dbDown) api('GET', '/api/health/db').catch(function () {});
+    // Siempre, no solo después de un error: así el aviso aparece también en
+    // pantallas que no consultan la API solas (por ejemplo, el registro).
+    api('GET', '/api/health/db').catch(function () {});
   }
 
   function withBusy(btn, promise) {
