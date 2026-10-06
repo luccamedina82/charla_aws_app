@@ -1,0 +1,41 @@
+# Build de la trivia en CodeBuild. Lo dispara CodePipeline con cada push a main.
+#
+# REPOSITORY_URI y CONTAINER_NAME llegan como variables de entorno del proyecto
+# de CodeBuild (las define Terraform, módulo cicd).
+#
+# CodeBuild ejecuta los comandos con /bin/sh, no con bash: nada de ${VAR:0:7}.
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+
+  pre_build:
+    commands:
+      # Corta el build si algún .js tiene un error de sintaxis. Es la demo de
+      # "build fallida": el pipeline se frena acá y el sitio sigue con la
+      # versión anterior. xargs devuelve != 0 si falla cualquier archivo.
+      - find app/src app/public -name '*.js' -print0 | xargs -0 -n1 node --check
+      - COMMIT=$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-7)
+      # Fecha UTC + commit: ordena junto con la imagen bootstrap y da trazabilidad.
+      - TAG="$(date -u +%Y%m%d-%H%M%S)-$COMMIT"
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "${REPOSITORY_URI%%/*}"
+
+  build:
+    commands:
+      # El Dockerfile está en app/. APP_VERSION se muestra en el pie de página.
+      - docker build --build-arg APP_VERSION="$COMMIT" -t "$REPOSITORY_URI:$TAG" ./app
+
+  post_build:
+    commands:
+      # Si el build falló, no pushear ni generar el artefacto.
+      - test "$CODEBUILD_BUILD_SUCCEEDING" = "1"
+      - docker push "$REPOSITORY_URI:$TAG"
+      # name tiene que ser igual al nombre del contenedor en la task definition.
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$CONTAINER_NAME" "$REPOSITORY_URI:$TAG" > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json

@@ -1,11 +1,13 @@
+# Imágenes base desde el espejo de ECR Public: en CodeBuild, Docker Hub limita
+# los pulls anónimos por IP y la IP es compartida.
 # ---------- dependencias ----------
-FROM node:22-alpine AS deps
+FROM public.ecr.aws/docker/library/node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ---------- imagen final ----------
-FROM node:22-alpine
+FROM public.ecr.aws/docker/library/node:22-alpine
 ENV NODE_ENV=production \
     PORT=8080
 WORKDIR /app

@@ -1,6 +1,6 @@
 # Trivia AWS Builders
 
-Trivia por niveles con tabla de puntuación en vivo, panel de admin para editar preguntas y MySQL para guardar jugadores y puntajes. Pensado para correr en **Amazon ECS (Fargate)** con dos servicios: uno para la app y otro para MySQL.
+Trivia por niveles con tabla de puntuación en vivo, panel de admin para editar preguntas y MySQL para guardar jugadores y puntajes. Corre en **Amazon ECS sobre EC2** detrás de un ALB, con la infraestructura en Terraform: [`charla_aws_terraform`](https://github.com/luccamedina82/charla_aws_terraform). Sitio: `https://charla.tekforge.site`.
 
 AWS Student Builder Group at UTN FRC.
 
@@ -34,7 +34,8 @@ AWS Student Builder Group at UTN FRC.
 ## Estructura
 
 ```
-trivia-aws/
+charla_aws_app/
+├── buildspec.yml              ← build de CodeBuild (lo dispara un push a main)
 ├── app/
 │   ├── Dockerfile
 │   ├── package.json / package-lock.json
@@ -43,16 +44,13 @@ trivia-aws/
 │   ├── src/db.js              ← conexión, reintentos y migración
 │   ├── src/seed-questions.js  ← las 15 preguntas iniciales
 │   └── public/                ← frontend (HTML/CSS/JS, sin build)
-├── ecs/
-│   ├── task-def-mysql.json
-│   ├── task-def-app.json
-│   ├── service-mysql.json
-│   └── service-app.json
 ├── docker-compose.yml         ← para probar local
 └── .env.example
 ```
 
-La app crea las tablas y carga las 15 preguntas la primera vez que arranca (solo si la tabla de preguntas está vacía). El contenedor de MySQL usa la **imagen oficial sin modificar**.
+La app crea las tablas y carga las 15 preguntas la primera vez que arranca (solo si la tabla de preguntas está vacía). La carga va con `GET_LOCK`: si dos tasks arrancan a la vez, solo una inserta. El contenedor de MySQL usa la **imagen oficial sin modificar**.
+
+Las task definitions y los servicios de ECS **no viven acá**: los crea Terraform y después el pipeline registra revisiones nuevas de la task definition del frontend.
 
 ---
 
@@ -71,116 +69,59 @@ Abrí http://localhost:8080. El panel de admin usa la contraseña que pusiste en
 
 | Variable | Para qué | Ejemplo |
 |---|---|---|
-| `DB_HOST` | Host de MySQL | `mysql` (alias de Service Connect) |
+| `DB_HOST` | Host de MySQL | `mysql.lab3.local` (Cloud Map, nunca una IP) |
 | `DB_PORT` | Puerto | `3306` |
 | `DB_NAME` / `DB_USER` | Base y usuario | `trivia` |
-| `DB_PASSWORD` | Contraseña del usuario | (Secrets Manager) |
-| `ADMIN_PASSWORD` | Contraseña del panel de admin | (Secrets Manager) |
-| `TOKEN_SECRET` | Firma las sesiones de admin. **Tiene que ser el mismo en todas las tasks.** | `openssl rand -hex 32` |
+| `DB_PASSWORD` | Contraseña del usuario | (SSM Parameter Store) |
+| `ADMIN_PASSWORD` | Contraseña del panel de admin | (SSM Parameter Store) |
+| `TOKEN_SECRET` | Firma las sesiones de admin. **Tiene que ser el mismo en todas las tasks.** | (SSM Parameter Store) |
 | `PORT` | Puerto HTTP | `8080` |
+| `APP_VERSION` | Versión que muestra el pie de página. La fija el build (`--build-arg`) | hash corto del commit |
+
+En AWS todas las de la base y los secretos llegan desde **SSM Parameter Store** por el bloque `secrets` de la task definition. Terraform genera las contraseñas al azar. Para leer la del panel de admin después de un `apply`:
+
+```bash
+aws ssm get-parameter --name /lab3/dev/app/admin_password --with-decryption \
+  --query Parameter.Value --output text --profile lab3
+```
 
 ---
 
-## Despliegue en ECS (Fargate)
-
-Arquitectura:
+## Despliegue en AWS
 
 ```
-Internet → ALB (:80/:443) → servicio trivia-app (2 tasks, :8080)
-                                   │  Service Connect "mysql:3306"
-                                   ▼
-                          servicio trivia-mysql (1 task) → EFS (/var/lib/mysql)
+Internet → ALB (:443, :80 redirige) → servicio frontend (2 tasks, :8080, una por AZ)
+                                           │  DB_HOST = mysql.lab3.local (Cloud Map)
+                                           ▼
+                                  servicio mysql (1 task) → EFS (/var/lib/mysql)
 ```
 
-En los JSON de `ecs/` reemplazá los `<PLACEHOLDERS>` (cuenta, región, subnets, security groups, EFS, ARNs de secretos y target group).
+La infraestructura entera (red, cluster ECS sobre EC2, ALB, HTTPS, EFS, SSM, ECR y el pipeline) está en [`charla_aws_terraform`](https://github.com/luccamedina82/charla_aws_terraform). Los pasos para levantarla están en su `docs/runbook.md`.
 
-### 1. Imagen de la app en ECR
+### Pipeline
 
-```bash
-aws ecr create-repository --repository-name trivia-aws
-aws ecr get-login-password | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
-docker build -t trivia-aws ./app
-docker tag trivia-aws:latest <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/trivia-aws:latest
-docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/trivia-aws:latest
-```
+Cada push a `main` dispara CodePipeline:
 
-> Si vas a buildear en una Mac con chip M, usá `docker build --platform linux/amd64 ...` (las task definitions están en `X86_64`).
+1. **Source**: este repo, vía CodeStar Connection.
+2. **Build**: CodeBuild corre `buildspec.yml`:
+   - `node --check` sobre todos los `.js`. Si alguno tiene un error de sintaxis, el build se corta y el sitio sigue con la versión anterior.
+   - `docker build ./app` con `APP_VERSION` = hash corto del commit.
+   - Push a ECR con tag `AAAAMMDD-HHMMSS-<commit>` (UTC).
+   - Genera `imagedefinitions.json` para el contenedor `frontend`.
+3. **Deploy**: ECS registra una task definition nueva y hace **blue/green** detrás del ALB, con 2 minutos de bake antes de cortar la versión vieja.
 
-### 2. Secretos (Secrets Manager)
+### Comportamiento ante fallas
 
-```bash
-aws secretsmanager create-secret --name trivia/db \
-  --secret-string '{"root_password":"<ROOT_PASS>","password":"<DB_PASS>"}'
-aws secretsmanager create-secret --name trivia/app \
-  --secret-string "{\"admin_password\":\"<ADMIN_PASS>\",\"token_secret\":\"$(openssl rand -hex 32)\"}"
-```
-
-Copiá los ARN completos (terminan en `-XXXXXX`) a las task definitions. El rol `ecsTaskExecutionRole` necesita `secretsmanager:GetSecretValue` sobre esos secretos.
-
-### 3. Almacenamiento para MySQL (EFS)
-
-**Importante:** sin un volumen persistente, si la task de MySQL se reinicia se pierden todos los puntajes. Por eso MySQL monta EFS.
-
-```bash
-aws efs create-file-system --encrypted --tags Key=Name,Value=trivia-mysql
-# Mount target en cada subnet privada, con un SG que acepte 2049 desde <SG_MYSQL>
-aws efs create-mount-target --file-system-id <EFS_ID> --subnet-id <PRIVATE_SUBNET_1> --security-groups <SG_EFS>
-aws efs create-mount-target --file-system-id <EFS_ID> --subnet-id <PRIVATE_SUBNET_2> --security-groups <SG_EFS>
-# Access point con el usuario de MySQL de la imagen oficial (uid/gid 999)
-aws efs create-access-point --file-system-id <EFS_ID> \
-  --posix-user Uid=999,Gid=999 \
-  --root-directory 'Path=/mysql,CreationInfo={OwnerUid=999,OwnerGid=999,Permissions=750}'
-```
-
-### 4. Security groups
-
-| SG | Entrada |
-|---|---|
-| `SG_ALB` | 80/443 desde Internet |
-| `SG_APP` | 8080 desde `SG_ALB` |
-| `SG_MYSQL` | 3306 desde `SG_APP` |
-| `SG_EFS` | 2049 desde `SG_MYSQL` |
-
-Las tasks van en subnets privadas: necesitan NAT Gateway (o VPC endpoints de ECR, Secrets Manager, CloudWatch Logs y S3) para bajar imágenes y leer secretos.
-
-### 5. Cluster, namespace y task definitions
-
-```bash
-aws ecs create-cluster --cluster-name trivia \
-  --service-connect-defaults namespace=trivia.local
-aws ecs register-task-definition --cli-input-json file://ecs/task-def-mysql.json
-aws ecs register-task-definition --cli-input-json file://ecs/task-def-app.json
-```
-
-### 6. ALB y target group
-
-- Target group tipo **IP**, protocolo HTTP, puerto **8080**.
-- Health check path: **`/api/health`** (devuelve 200 solo si la app llega a MySQL).
-- Listener del ALB → ese target group. Copiá su ARN a `ecs/service-app.json`.
-
-### 7. Servicios (primero MySQL)
-
-```bash
-aws ecs create-service --cli-input-json file://ecs/service-mysql.json
-# esperá a que la task de MySQL esté RUNNING y healthy
-aws ecs create-service --cli-input-json file://ecs/service-app.json
-```
-
-La app reintenta conectarse a MySQL durante ~2 minutos al arrancar, así que si arranca antes no pasa nada.
+- **`/api/health` no toca la base.** Es el health check del ALB: si consultara MySQL, una caída de la base marcaría todas las tasks como unhealthy y ECS las mataría, convirtiendo una falla parcial en una caída total. Para ver el estado de la base está `/api/health/db`, que el ALB no usa.
+- **La app escucha antes de conectar con la base.** La conexión y la migración corren en segundo plano, con reintentos sin límite. Una task que arranca con MySQL caído igual pasa el health check.
+- **Con la base caída**, `/api` responde `503 DB_UNAVAILABLE`, el frontend muestra un aviso y reintenta solo cada 5 s. Cuando la base vuelve, todo se recupera sin recargar.
+- **El pie de página muestra qué task respondió**, su AZ y la versión, con un color derivado del ID de la task. Sale de `/api/whoami`, que lee el metadata endpoint de ECS.
 
 ### Notas de operación
 
-- **MySQL siempre con 1 sola task.** `service-mysql.json` usa `minimumHealthyPercent: 0` y `maximumPercent: 100` para que en un deploy nunca haya dos MySQL escribiendo sobre el mismo EFS. Por eso un redeploy de MySQL tiene unos segundos de corte.
+- **MySQL siempre con 1 sola task**, para que nunca haya dos escribiendo sobre el mismo EFS.
 - La **app sí escala horizontalmente** (es stateless: las sesiones viven en MySQL, no en memoria). Por eso `TOKEN_SECRET` tiene que ser el mismo en todas las tasks.
 - Para un evento corto, MySQL en contenedor + EFS alcanza. Si esto pasa a uso permanente, conviene migrar la base a **Amazon RDS for MySQL** (backups automáticos, Multi-AZ): solo cambia `DB_HOST`, la app no necesita cambios.
-- Logs en CloudWatch, grupo `/ecs/trivia`.
-
-### Actualizar la app
-
-```bash
-docker build -t trivia-aws ./app && docker tag ... && docker push ...
-aws ecs update-service --cluster trivia --service trivia-app --force-new-deployment
-```
 
 ---
 
@@ -199,7 +140,9 @@ aws ecs update-service --cluster trivia --service trivia-app --force-new-deploym
 | `GET` | `/api/admin/players` | admin |
 | `DELETE` | `/api/admin/players/:id` | admin |
 | `POST` | `/api/admin/reset` `{confirm:"REINICIAR"}` | admin |
-| `GET` | `/api/health` | health check del ALB / ECS |
+| `GET` | `/api/health` | health check del ALB (no toca la base) |
+| `GET` | `/api/health/db` | diagnóstico: 200 si la base responde, 503 si no |
+| `GET` | `/api/whoami` | público: task, AZ y versión que respondieron |
 
 ---
 
