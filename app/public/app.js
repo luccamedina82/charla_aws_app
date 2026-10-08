@@ -238,7 +238,7 @@
       '<section class="register">' +
         '<div class="stack">' +
           '<p class="eyebrow">Juego de preguntas</p>' +
-          '<h1 class="title">Trivia AWS DEMO</h1>' +
+          '<h1 class="title">Trivia AWS</h1>' +
           '<p class="lead">Ingresá tu nombre y tu mail para empezar. Elegí un nivel, respondé y sumá puntos. Cada persona juega una sola vez y cada pregunta se responde una única vez.</p>' +
           '<div class="points-legend">' + legend + '</div>' +
         '</div>' +
